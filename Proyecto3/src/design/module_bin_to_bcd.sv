@@ -2,7 +2,7 @@
 
 module module_bin_to_bcd (
     input  [11:0] i_bin,   // Entrada binaria de 12 bits
-    output [15:0] o_bcd    // Salida BCD de 16 bits (4 dígitos)
+    output reg [15:0] o_bcd    // Salida BCD de 16 bits (4 dígitos)
 );
 
     reg [11:0] bin_shift;

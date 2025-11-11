@@ -1,84 +1,122 @@
+
 `timescale 1ns/1ps
 
 module module_lecture(
     input        clk,
     input        n_reset,
-    input  [3:0] filas_raw,
+    input  [3:0] filas_raw,      // Filas directas del teclado (con rebote)
     output [3:0] columnas,
-    output [3:0] sample
+    output reg  [3:0] sample       // Código de la tecla presionada
 );
 
-    reg [16:0] counter = 0;
-    reg [1:0] col_index = 0;
-    reg [3:0] columnas_reg = 4'b0001;
-    reg [3:0] sample_reg = 4'h0;
-    reg [3:0] last_tecla = 4'h0;
-    reg [9:0] same_count = 0;
+    // --- Antirrebote para las 4 filas ---
+    wire [3:0] filas_debounced; // Salida de los módulos antirrebote
 
-    always @(posedge clk or negedge n_reset) begin
+    // Instanciamos un módulo DeBounce para cada una de las 4 filas.
+    // El parámetro STABLE_CYCLES (ej. 50000 para ~1ms con clk de 50MHz)
+    // determina cuánto tiempo debe estar estable la señal para ser válida.
+    // Puedes ajustar este valor si el rebote persiste.
+    generate
+        genvar i;
+        for (i = 0; i < 4; i = i + 1) begin : debounce_gen
+            module_DeBounce #(.STABLE_CYCLES(50000)) u_debounce (
+                .clk(clk),
+                .rst_n(n_reset),
+                .btn_async(filas_raw[i]),
+                .btn_level(filas_debounced[i]),
+                .btn_pulse() // No usamos el pulso aquí
+            );
+        end
+    endgenerate
+
+    // --- Lógica de Escaneo de Teclado ---
+    reg [1:0]  col_index = 0;
+    reg [16:0] scan_counter = 0; // Contador para cambiar de columna
+
+    // El registro de columnas se rota para activar una columna a la vez.
+    // El valor activo es '0'.
+    reg [3:0] columnas_reg = 4'b1110; 
+    assign columnas = columnas_reg;
+
+    // Escaneo de columnas
+    always_ff @(posedge clk or negedge n_reset) begin
         if (!n_reset) begin
-            counter <= 0;
-            col_index <= 0;
-            columnas_reg <= 4'b0001;
-            sample_reg <= 4'h0;
-            last_tecla <= 4'h0;
-            same_count <= 0;
+            scan_counter <= '0;
+            col_index <= '0;
+            columnas_reg <= 4'b1110;
         end else begin
-            counter <= counter + 1;
-            
-            if (counter[16]) begin
-                counter <= 0;
-                col_index <= col_index + 1;
-                
-                case (col_index)
-                    2'd0: columnas_reg <= 4'b0001;
-                    2'd1: columnas_reg <= 4'b0010;
-                    2'd2: columnas_reg <= 4'b0100;
-                    2'd3: columnas_reg <= 4'b1000;
-                endcase
-            end
-            
-            // MAPEO ORIGINAL EXACTO (de tu versión que funcionaba)
-            if (filas_raw != 4'b1111) begin
-                case ({columnas_reg, filas_raw})
-                    // COLUMNA 1
-                    8'b0001_1110: if (last_tecla != 4'h2) begin last_tecla <= 4'h2; same_count <= 0; end
-                    8'b0001_1101: if (last_tecla != 4'h5) begin last_tecla <= 4'h5; same_count <= 0; end
-                    8'b0001_1011: if (last_tecla != 4'h8) begin last_tecla <= 4'h8; same_count <= 0; end
-                    8'b0001_0111: if (last_tecla != 4'h0) begin last_tecla <= 4'h0; same_count <= 0; end
-
-                    // COLUMNA 2
-                    8'b0010_1110: if (last_tecla != 4'h3) begin last_tecla <= 4'h3; same_count <= 0; end
-                    8'b0010_1101: if (last_tecla != 4'h6) begin last_tecla <= 4'h6; same_count <= 0; end
-                    8'b0010_1011: if (last_tecla != 4'h9) begin last_tecla <= 4'h9; same_count <= 0; end
-                    8'b0010_0111: if (last_tecla != 4'hF) begin last_tecla <= 4'hF; same_count <= 0; end
-
-                    // COLUMNA 3
-                    8'b0100_1110: if (last_tecla != 4'h1) begin last_tecla <= 4'h1; same_count <= 0; end
-                    8'b0100_1101: if (last_tecla != 4'h4) begin last_tecla <= 4'h4; same_count <= 0; end
-                    8'b0100_1011: if (last_tecla != 4'h7) begin last_tecla <= 4'h7; same_count <= 0; end
-                    8'b0100_0111: if (last_tecla != 4'hE) begin last_tecla <= 4'hE; same_count <= 0; end
-
-                    // COLUMNA 4
-                    8'b1000_1110: if (last_tecla != 4'hA) begin last_tecla <= 4'hA; same_count <= 0; end
-                    8'b1000_1101: if (last_tecla != 4'hB) begin last_tecla <= 4'hB; same_count <= 0; end
-                    8'b1000_1011: if (last_tecla != 4'hC) begin last_tecla <= 4'hC; same_count <= 0; end
-                    8'b1000_0111: if (last_tecla != 4'hD) begin last_tecla <= 4'hD; same_count <= 0; end
-                endcase
-                
-                if (same_count < 10'h3FF) begin
-                    same_count <= same_count + 1;
-                end else begin
-                    sample_reg <= last_tecla;
-                end
+            // Incrementamos el contador en cada ciclo.
+            // Cuando llega a un umbral, cambiamos a la siguiente columna.
+            // Esto ralentiza el escaneo para que los antirrebotes funcionen bien.
+            // Un valor de 20000 da un buen margen.
+            if (scan_counter < 20000) begin
+                scan_counter <= scan_counter + 1;
             end else begin
-                same_count <= 0;
-                last_tecla <= 4'h0;
+                scan_counter <= '0;
+                col_index <= (col_index == 3) ? 0 : col_index + 1;
+                
+                // Rotar el '0' en las columnas
+                columnas_reg <= {columnas_reg[2:0], columnas_reg[3]};
             end
         end
     end
 
-    assign columnas = columnas_reg;
-    assign sample = sample_reg;
+    // --- Detección de Tecla Presionada (Síncrona) ---
+    // Este bloque se ha cambiado a always_ff (síncrono) para evitar
+    // condiciones de carrera (race conditions) entre el cambio del
+    // índice de columna (col_index) y el estado de las filas (filas_debounced).
+    // Al registrar la salida, nos aseguramos de que la decodificación
+    // sea estable y se elimine el "ghosting".
+    always_ff @(posedge clk or negedge n_reset) begin
+        if (!n_reset) begin
+            sample <= 4'hF;
+        end else begin
+            // Por defecto, mantenemos el valor anterior si una tecla sigue presionada,
+            // o lo limpiamos si no hay ninguna.
+            if (filas_debounced == 4'b1111) begin
+                sample <= 4'hF;
+            end else begin
+                // Decodificamos la tecla basándonos en la columna activa y la fila presionada.
+                case (col_index)
+                    2'd0: begin // Columna 0
+                        case (filas_debounced)
+                            4'b1110: sample <= 4'h1;
+                            4'b1101: sample <= 4'h4;
+                            4'b1011: sample <= 4'h7;
+                            4'b0111: sample <= 4'hE;
+                            default: sample <= 4'hF; // Evita latches en caso de múltiples pulsaciones
+                        endcase
+                    end
+                    2'd1: begin // Columna 1
+                        case (filas_debounced)
+                            4'b1110: sample <= 4'h2;
+                            4'b1101: sample <= 4'h5;
+                            4'b1011: sample <= 4'h8;
+                            4'b0111: sample <= 4'h0;
+                            default: sample <= 4'hF;
+                        endcase
+                    end
+                    2'd2: begin // Columna 2
+                        case (filas_debounced)
+                            4'b1110: sample <= 4'h3;
+                            4'b1101: sample <= 4'h6;
+                            4'b1011: sample <= 4'h9;
+                            4'b0111: sample <= 4'hC;
+                            default: sample <= 4'hF;
+                        endcase
+                    end
+                    2'd3: begin // Columna 3
+                        case (filas_debounced)
+                            4'b1110: sample <= 4'hA;
+                            4'b1101: sample <= 4'hB;
+                            4'b1011: sample <= 4'hD;
+                            4'b0111: sample <= 4'hF;
+                            default: sample <= 4'hF;
+                        endcase
+                    end
+                endcase
+            end
+        end
+    end
 
 endmodule
