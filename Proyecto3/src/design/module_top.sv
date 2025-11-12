@@ -1,114 +1,109 @@
-`timescale 1ns/1ps
-
-module module_top(
-    input  wire        clk,
-    output wire [3:0]  columnas,
-    input  wire [3:0]  filas_raw,
-    output wire [3:0]  a,
-    output wire [6:0]  d
+module top (
+    input  logic        clk,
+    input  logic        rst,
+    input  logic [3:0]  row,   // filas del teclado físico
+    output logic [3:0]  col,   // columnas del teclado
+    output logic [6:0]  seg,   // segmentos display
+    output logic [3:0]  an     // anodos display
 );
 
-    wire [3:0] key_sample;
-    wire [13:0] resultado_suma;
-    wire result_valid;
-    wire result_pulse;
-    wire overflow;
-    wire [11:0] bin_para_conversor;
-    wire [15:0] bcd_para_display;
-    wire [6:0] segments;
-    wire [3:0] anodos;
+    // Señales internas
+    logic        key_valid;
+    logic [3:0]  key_code;
+    logic [3:0]  row_debounced;
 
-    // Reset interno
-    reg rst_n;
-    reg [23:0] reset_counter = 0;
-    
-    // Detección de pulsos de teclas
-    reg [3:0] last_key_sample = 0;
-    reg key_pulse = 0;
-    
-    always @(posedge clk) begin
-        if (reset_counter < 24'hFFFFFF) begin
-            reset_counter <= reset_counter + 1;
-            rst_n <= 1'b0;
-        end else begin
-            rst_n <= 1'b1;
-        end
-    end
+    logic [15:0] A_reg, B_reg;
+    logic        sign_A, sign_B;
+    logic        start_div, valid_div;
+    logic [15:0] Q_out, R_out;
+    logic        sign_Q, sign_R;
+    logic        done_div, error_div0;
 
-    // Detectar flanco de tecla para generar pulso
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            last_key_sample <= 0;
-            key_pulse <= 0;
-        end else begin
-            // Detectar cuando cambia la tecla (flanco de subida)
-            if (key_sample != 0 && key_sample != last_key_sample) begin
-                key_pulse <= 1'b1;
-            end else begin
-                key_pulse <= 1'b0;
-            end
-            last_key_sample <= key_sample;
-        end
-    end
+    logic [15:0] bcd_out;
+    logic [3:0]  mux_out;
+    logic [6:0]  seg_dec;
 
-    // Módulo lecture (teclado)
-    module_lecture u_lecture (
+    // 1. Filtrado robusto de rebote
+    DeBounce db_inst (
         .clk(clk),
-        .n_reset(rst_n),
-        .filas_raw(filas_raw),
-        .columnas(columnas),
-        .sample(key_sample)
+        .rst(rst),
+        .key_in(row),
+        .key_out(row_debounced)
     );
 
-    // CONVERSOR de teclas físicas a códigos del módulo suma
-    wire [3:0] key_code_para_suma;
-    assign key_code_para_suma = 
-        (key_sample == 4'h2) ? 4'h1 : // Tecla 1 física → Dígito 1
-        (key_sample == 4'h5) ? 4'h2 : // Tecla 2 física → Dígito 2
-        (key_sample == 4'h8) ? 4'h3 : // Tecla 3 física → Dígito 3
-        (key_sample == 4'h3) ? 4'h4 : // Tecla 4 física → Dígito 4
-        (key_sample == 4'h6) ? 4'h5 : // Tecla 5 física → Dígito 5
-        (key_sample == 4'h9) ? 4'h6 : // Tecla 6 física → Dígito 6
-        (key_sample == 4'h1) ? 4'h7 : // Tecla 7 física → Dígito 7
-        (key_sample == 4'h4) ? 4'h8 : // Tecla 8 física → Dígito 8
-        (key_sample == 4'h7) ? 4'h9 : // Tecla 9 física → Dígito 9
-        (key_sample == 4'h0) ? 4'h0 : // Tecla 0 física → Dígito 0
-        (key_sample == 4'hA) ? 4'd10 : // Tecla A → ADD
-        (key_sample == 4'hB) ? 4'd11 : // Tecla B → EQUAL
-        (key_sample == 4'hC) ? 4'd12 : // Tecla C → CLEAR
-        4'd15; // Otras teclas → ignorar
-
-    // NUEVO módulo suma funcional
-    module_suma u_suma (
+    // 2. Escaneo y decodificación del teclado
+    lecture lect_inst (
         .clk(clk),
-        .rst_n(rst_n),
-        .key_code(key_code_para_suma),
-        .key_pulse(key_pulse),  // Usar detección real de pulsos
-        .result(resultado_suma),
-        .result_valid(result_valid),
-        .result_pulse(result_pulse),
-        .overflow(overflow)
+        .rst(rst),
+        .row_debounced(row_debounced),
+        .col(col),
+        .key_valid(key_valid),
+        .key_code(key_code)
     );
 
-    // Conversión a BCD
-    assign bin_para_conversor = resultado_suma[11:0];
-    
-    module_bin_to_bcd u_bin_to_bcd (
-        .i_bin(bin_para_conversor),
-        .o_bcd(bcd_para_display)
-    );
-
-    // Display controller
-    module_disp_controller u_display (
+    // 3. Controlador de entrada (FSM)
+    input_controller ic_inst (
         .clk(clk),
-        .rst(~rst_n),
-        .data(bcd_para_display),
-        .seg(segments),
-        .an(anodos)
+        .rst(rst),
+        .key_valid(key_valid),
+        .key_code(key_code),
+        .start_div(start_div),
+        .valid_div(valid_div),
+        .A_reg(A_reg),
+        .B_reg(B_reg),
+        .sign_A(sign_A),
+        .sign_B(sign_B)
     );
 
-    // Asignar salidas
-    assign a = anodos;
-    assign d = segments;
+    // 4. Módulo de cálculo (ejemplo con divisor)
+    div_unit_pipelined #(.N(16), .STAGES(4)) div_inst (
+        .clk(clk),
+        .rst(rst),
+        .start(start_div),
+        .valid(valid_div),
+        .A_in(A_reg),
+        .B_in(B_reg),
+        .sign_A(sign_A),
+        .sign_B(sign_B),
+        .Q_out(Q_out),
+        .R_out(R_out),
+        .sign_Q(sign_Q),
+        .sign_R(sign_R),
+        .done(done_div),
+        .error_div0(error_div0)
+    );
+
+    // 5. Conversión binario a BCD
+    bin_to_bcd bcd_inst (
+        .clk(clk),
+        .rst(rst),
+        .bin(Q_out),   // ejemplo: convertir cociente
+        .bcd(bcd_out)
+    );
+
+    // 6. Multiplexor de dígitos
+    mux mux_inst (
+        .clk(clk),
+        .rst(rst),
+        .in(bcd_out),
+        .out(mux_out)
+    );
+
+    // 7. Decodificador de segmentos
+    disp_dec dec_inst (
+        .clk(clk),
+        .rst(rst),
+        .digit(mux_out),
+        .seg(seg_dec)
+    );
+
+    // 8. Controlador de displays
+    disp_controller disp_inst (
+        .clk(clk),
+        .rst(rst),
+        .seg(seg_dec),
+        .an(an),
+        .seg_out(seg)
+    );
 
 endmodule
