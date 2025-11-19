@@ -1,109 +1,130 @@
-module top (
+module module_top (
     input  logic        clk,
-    input  logic        rst,
-    input  logic [3:0]  row,   // filas del teclado físico
-    output logic [3:0]  col,   // columnas del teclado
-    output logic [6:0]  seg,   // segmentos display
-    output logic [3:0]  an     // anodos display
+    input  logic [3:0]  fil,
+    input  logic        rst_in,
+    output logic        rst_1,
+    output logic [3:0]  col,
+    output logic [6:0]  seg,
+    output logic        seg_dot,
+    output logic [3:0]  cats
 );
-
-    // Señales internas
-    logic        key_valid;
-    logic [3:0]  key_code;
-    logic [3:0]  row_debounced;
-
-    logic [15:0] A_reg, B_reg;
-    logic        sign_A, sign_B;
-    logic        start_div, valid_div;
-    logic [15:0] Q_out, R_out;
-    logic        sign_Q, sign_R;
-    logic        done_div, error_div0;
-
-    logic [15:0] bcd_out;
-    logic [3:0]  mux_out;
-    logic [6:0]  seg_dec;
-
-    // 1. Filtrado robusto de rebote
-    DeBounce db_inst (
+    logic [3:0]  numero;
+    logic        reset;
+    logic        save;
+    logic press;
+    assign rst_1 = 1'b1;
+    module_lectura #(.WIDTH(4)) SDL (
         .clk(clk),
-        .rst(rst),
-        .key_in(row),
-        .key_out(row_debounced)
-    );
-
-    // 2. Escaneo y decodificación del teclado
-    lecture lect_inst (
-        .clk(clk),
-        .rst(rst),
-        .row_debounced(row_debounced),
         .col(col),
-        .key_valid(key_valid),
-        .key_code(key_code)
+        .fil(fil),
+        .press_DB(press),
+        .numero(numero),
+        .reset(reset),
+        .rst_in(rst_in),
+        .save(save)
     );
 
-    // 3. Controlador de entrada (FSM)
-    input_controller ic_inst (
+    logic  sel_disp;
+    logic [1:0] sel_AB;
+    logic reset_combined;
+    logic reset_2;
+    assign reset_combined = reset | reset_2;
+
+    module_fsm fsm (
         .clk(clk),
-        .rst(rst),
-        .key_valid(key_valid),
-        .key_code(key_code),
-        .start_div(start_div),
-        .valid_div(valid_div),
-        .A_reg(A_reg),
-        .B_reg(B_reg),
-        .sign_A(sign_A),
-        .sign_B(sign_B)
+        .reset(reset),
+        .reset_2(reset_2),
+        .press(press),
+        .y_AB(sel_AB),
+        .y_disp(sel_disp)
     );
 
-    // 4. Módulo de cálculo (ejemplo con divisor)
-    div_unit_pipelined #(.N(16), .STAGES(4)) div_inst (
+    logic [15:0] digitos;
+    
+    logic [3:0] A,B;
+    module_register #(.WIDTH(4)) RA (
         .clk(clk),
-        .rst(rst),
-        .start(start_div),
-        .valid(valid_div),
-        .A_in(A_reg),
-        .B_in(B_reg),
-        .sign_A(sign_A),
-        .sign_B(sign_B),
-        .Q_out(Q_out),
-        .R_out(R_out),
-        .sign_Q(sign_Q),
-        .sign_R(sign_R),
-        .done(done_div),
-        .error_div0(error_div0)
+        .reset(reset_combined),
+        //.en(selector[0]),
+        .en(press & sel_AB[0]), // Siempre habilitado para capturar el primer dígito
+        .d(numero),
+        .q(A)
     );
 
-    // 5. Conversión binario a BCD
-    bin_to_bcd bcd_inst (
+    module_register #(.WIDTH(4)) RB (
         .clk(clk),
-        .rst(rst),
-        .bin(Q_out),   // ejemplo: convertir cociente
-        .bcd(bcd_out)
+        .reset(reset_combined),
+        //.en(selector[1]),
+        .en(press & sel_AB[1]),
+        .d(numero),
+        .q(B)
     );
 
-    // 6. Multiplexor de dígitos
-    mux mux_inst (
+    assign digitos = {4'b1000, A, B, 4'b1000};
+
+    logic [7:0] digitos_COC;
+    logic [7:0] digitos_RES;
+    logic [3:0] digitos_COC_bin;
+    logic [3:0] digitos_RES_bin;
+
+    module_divisor divisor (
         .clk(clk),
-        .rst(rst),
-        .in(bcd_out),
-        .out(mux_out)
+        .A(A),
+        .B(B),
+        .R(digitos_RES_bin),
+        .Q(digitos_COC_bin)
     );
 
-    // 7. Decodificador de segmentos
-    disp_dec dec_inst (
+    module_bintobcd bcd (
+        .bin_1(digitos_COC_bin),
+        .bin_2(digitos_RES_bin),
+        .bcd_1(digitos_COC),
+        .bcd_2(digitos_RES)
+    );
+    
+    logic [3:0] digito;
+    logic [1:0] sel_digitos;
+
+    module_contador contador(
         .clk(clk),
-        .rst(rst),
-        .digit(mux_out),
-        .seg(seg_dec)
+        .sel(sel_digitos)
     );
 
-    // 8. Controlador de displays
-    disp_controller disp_inst (
-        .clk(clk),
-        .rst(rst),
-        .seg(seg_dec),
-        .an(an),
-        .seg_out(seg)
+    // Cambio de dígitos a 1kHz
+    module_mux_41 seleccion (
+        .sel(sel_digitos),
+        .in_data(digitos),
+        .out_data(digito)
     );
+
+    logic [3:0] digito_2;
+
+    module_mux_41 seleccion_2 (
+        .sel(sel_digitos),
+        .in_data({digitos_COC, digitos_RES}),
+        .out_data(digito_2)
+    );
+
+    logic [3:0] num;
+    module_mux_21 seleccion_final (
+        .sel(sel_disp),
+        .in_1(digito),
+        .in_2(digito_2),
+        .out_data(num)
+    );
+    // Barrido de cátodos a 1kHz
+    module_barrido #(
+        .ACTIVE_LOW(1'b1) // Salida active-low para cátodo común
+    ) BC (
+        .apagar(~sel_disp),
+        .clk(clk),
+        .col(cats)
+    );
+    
+    module_sevenseg D7S (
+        .num(num),
+        .seg(seg)
+    );
+    assign seg_dot = 1'b0; // punto desactivado
 
 endmodule
