@@ -513,8 +513,13 @@ col = 000x
 
 ## 7. Bitácoras: 
 **JULIO DAVID QUESADA HERNÁNDEZ**
+
 <img width="1141" height="1508" alt="image" src="https://github.com/user-attachments/assets/1586e248-e5f3-4277-a2a1-43149ac77e3f" />
 
+
 **RAMSES ALONSO CORTES TORRES**
+
 ![Screenshot_20251126_000319_Drive](https://github.com/user-attachments/assets/f41b217b-80c9-4c9b-a269-7078a68f73ef)
+
+
 ![Screenshot_20251126_000333_Drive](https://github.com/user-attachments/assets/487caa82-2167-43cb-acab-e5a2c61d3a6b)
