@@ -22,8 +22,7 @@ Se logró implementar correctamente la lectura del teclado hexadecimal, permitie
 Sin embargo, aunque el sistema funciona correctamente en simulación, la integración completa del algoritmo de división en la implementación física presentó dificultades relacionadas con sincronización y temporización. Por esta razón, se desarrollaron dos versiones del módulo principal: una dedicada a la validación del funcionamiento del teclado y los displays en hardware físico, y otra dedicada a la ejecución completa de la división entera, la cual se validó únicamente en simulación. 
 
 ## 3. Descripción General del Sistema: 
-<img width="1768" height="495" alt="image" src="https://github.com/user-attachments/assets/fb0c2900-af18-4b2c-887a-4f84e8529d83" />
-
+![Diagrama de bloques Proyecto 3_251125_180009_page-0001](https://github.com/user-attachments/assets/b68718eb-ed9a-47fc-af90-b11ab3533065)
 De forma general, el circuito desarrollado tiene como función principal recibir dos números ingresados desde un teclado hexadecimal. Estos valores son almacenados internamente mediante flip-flops que operan bajo el control de una máquina de estados finita.
 
 Antes de ser procesadas, las señales provenientes del teclado atraviesan un módulo debouncer, encargado de eliminar los rebotes eléctricos para asegurar que solo se registre una pulsación válida por tecla. Una vez filtrada la señal, los datos se envían al módulo de la máquina de estados encargada de la operación de división entera.
